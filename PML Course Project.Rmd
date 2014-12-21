@@ -1,0 +1,148 @@
+---
+title: "PML Course Project Writeup"
+author: "Chandrashekar V"
+date: "Sunday, December 21, 2014"
+output: html_document
+---
+
+This document talks about the process of machine learning used to solve the question posed regarding "Predicting the Quality of an Activity".
+
+There are three sections to this document:
+
+1. Getting the data into R & Cleaning it
+
+2. Building a model using the selected learning algorithm
+
+3. Using the model to predict
+
+## 1. Getting the data into R & Cleaning it
+
+Since the files are given to us in the form of csv files, these can be read using the *read.csv* function in R:
+```{r, eval=FALSE}
+  training<-read.csv("<Folder Location>\\pml-training.csv")
+  testing<-read.csv("<Folder Location>\\pml-testing.csv")
+```
+
+A quick summary tells us that there are 159 columns and about 19622 rows in the training data:
+```{r, eval=FALSE}
+  dim(training)
+```
+
+ and 160 columns and 20 rows in the testing data:
+```{r, eval=FALSE}
+dim(testing)
+```
+
+Now, all the 159 columns in the training data cannot be used as it is. Many of them have to be removed. The first category to be removed are the columns which have near-zero variance across all the 19622 rows. This can be done using the *nearZeroVar* function in the caret package. The columns can be identified as follows:
+
+```{r, eval=FALSE}
+  library(caret)
+  nzv<- nearZeroVar(training,saveMetrics=TRUE)
+```
+
+Add an index column to the nzv data frame, which has the near-zero variance information on all columns, and extract those columns for which the column *nzv$nzv* is TRUE:
+```{r,eval=FALSE}
+  nzv$index<-seq.int(nrow(nzv))
+  indices<-nzv$index[nzv$nzv=="TRUE"]
+  trainingDataWithoutNZV<-training[,-indices]
+```
+
+Also the first four columns in the training data (name, timestamp etc.) are not useful in predicting the quality of the activity (variable "classe"). These can also be removed:
+```{r,eval=FALSE}
+  indicesNotRelevant<- c(1,2,3,4)
+  trainingWithoutNZV<-trainingWithoutNZV[,-indicesNotRelevant]
+```
+
+Next, looking at the columns which have missing values, it is apparent that there are many columns which have NA value in about 19200 rows out of 19622. These column are anyway not adding to the predictive capability of the data set and can be eliminated from the training data as follows:
+```{r,eval=FALSE}
+  trainingWithoutNA<-trainingWithoutNZV[,!apply(trainingWithoutNZV,2,function(x)any(is.na(x)))]
+```
+
+Thus, the training data has been cleaned to have only 54 columns out of the initial 160 columns. The next step is to build a model using this cleaned data.
+
+## 2. Building a model using the selected learning algorithm
+
+The selected learning algorithm is "Random Forest" because of the following reasons:
+
+  1. This problem requires a classification approach since the predicted variable "classe" is a factor. Random Forest and rpart Decision Trees fit the bill
+  
+  2. Upon running the rpart method and building a decision tree on the training data, a model is generated with very low accuracy (~ 54%). Hence rpart Decision Tree classifier is out of the window
+  
+  3. Random Forest can potentially improve upon the performance of the rpart algorithm
+  
+
+To run the Random Forest algorithm, it was necessary to take a smaller sample out of the cleaned training data to build a model in a reasonable time. A figure of 20% was chosen and a sample was extracted as follows:
+```{r,eval=FALSE}
+  trainingReducedTwentyPercent<-createDataPartition(y=trainingWithoutNA$classe,p=0.20,list=FALSE)
+  trainingReducedTwentyPercent<-trainingWithoutNA[trainingReducedTwentyPercent,]
+```
+
+The Random Forest training method is called as follows on the reduced data set:
+```{r, eval=FALSE}
+  modelFitReducedTwentyPercent<-train(classe ~.,data=trainingReducedTwentyPercent,method="rf",prox=TRUE)
+```
+
+The model was almost 96% accurate on the training data set:
+```
+> modelFitReducedTwentyPercent
+Random Forest 
+
+2946 samples
+  53 predictor
+   5 classes: 'A', 'B', 'C', 'D', 'E' 
+
+No pre-processing
+Resampling: Bootstrapped (25 reps) 
+
+Summary of sample sizes: 2946, 2946, 2946, 2946, 2946, 2946, ... 
+
+Resampling results across tuning parameters:
+
+  mtry  Accuracy   Kappa      Accuracy SD  Kappa SD   
+   2    0.9533843  0.9409546  0.006186279  0.007786946
+  27    0.9682001  0.9597275  0.007145330  0.009032481
+  53    0.9615477  0.9513106  0.009965704  0.012603245
+
+Accuracy was used to select the optimal model using  the largest value.
+The final value used for the model was mtry = 27. 
+```
+
+Other sample sizes were also tried like 5% sampling (84% accurate) and 10% sampling (93% accurate). Compared to these, the twenty sampling model had a higher accuracy as well as a resonable running time of less than 30 minutes (on a dual core processor). Hence the model *modelFitReducedTwentyPercent* was selected as the final model.
+
+A confusion matrix on the training data can be built as follows:
+```{r, eval=FALSE}
+predicted<-predict(modelFitReducedTwentyPercent,trainingReducedTwentyPercent)
+table(predicted,trainingReducedTwentyPercent$classe)
+```
+```
+predicted   A   B   C   D   E
+        A 837   0   0   0   0
+        B   0 570   0   0   0
+        C   0   0 514   0   0
+        D   0   0   0 483   0
+        E   0   0   0   0 542
+```
+
+## 3. Using the model to predict
+
+The model that has been trained can now be used on the testing data. Before that the testing data had to be similarly cleaned to match the training data:
+```{r, eval=FALSE}
+trainingReducedTwentyPercent<-trainingReducedTwentyPercent[,!(names(trainingReducedTwentyPercent) %in% "predRight")]
+trainingReducedTwentyPercentWithoutClasse<-trainingReducedTwentyPercent[,!(names(trainingReducedTwentyPercent) %in% "classe")]
+requiredNames<-c(names(trainingReducedTwentyPercentWithoutClasse))
+testingReallyReduced<-testing[,(names(testing) %in% requiredNames)]
+```
+
+What the above piece of code does is to make sure that the testing data has the same columns as the training data.
+
+Then the reduced testing data is given to the predict function along with the model:
+```{r, eval=FALSE}
+predictedTesting<-predict(modelFitReducedTwentyPercent,testingReallyReduced)
+```
+
+The predicted classes for the twenty rows are as follows:
+```
+> predictedTesting
+ [1] B A B A A E D D A A B C B A E E A B B B
+Levels: A B C D E
+```
